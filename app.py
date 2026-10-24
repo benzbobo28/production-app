@@ -1,26 +1,18 @@
-import os
-import uuid
-from flask import Flask, request, abort, send_from_directory
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, ImageMessage, TextSendMessage
+import streamlit as st
 from google import genai
 import pandas as pd
 from PIL import Image
 import io
 
-app = Flask(__name__)
+st.set_page_config(page_title="Production to Excel", page_icon="📊", layout="centered")
 
-# โฟลเดอร์สำหรับเก็บไฟล์ Excel เพื่อให้ผู้ใช้กดดาวน์โหลด
-UPLOAD_FOLDER = 'static'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+st.title("📊 แปลงใบจดบันทึกยอดผลิตเป็น Excel")
+st.write("อัปโหลดรูปภาพใบจดบันทึกของคุณ ระบบจะดึงข้อมูลลงตาราง 31 คอลัมน์ (มีคอลัมน์ 'dough') ให้ทันทีครับ")
 
-LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
-LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# ช่องใส่ Gemini API Key (หรือจะดึงจาก Environment Variable ก็ได้ครับ)
+api_key = st.text_input("🔑 ใส่ Google Gemini API Key ของคุณ:", type="password")
 
-line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(LINE_CHANNEL_SECRET)
+uploaded_file = st.file_uploader("📸 เลือกรูปภาพใบจดบันทึกยอดผลิต (JPG, PNG)", type=["jpg", "jpeg", "png"])
 
 HEADERS = [
     "วันที่", "กะ", "เครื่องจักร", "dough", "คอลัมน์5", "คอลัมน์6", "คอลัมน์7", "คอลัมน์8", 
@@ -30,68 +22,42 @@ HEADERS = [
     "คอลัมน์30", "คอลัมน์31"
 ]
 
-@app.route("/callback", methods=['POST'])
-def callback():
-    signature = request.headers['X-Line-Signature']
-    body = request.get_data(as_text=True)
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
-    return 'OK'
-
-# Route สำหรับดาวน์โหลดไฟล์ Excel
-@app.route('/static/<filename>')
-def download_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
-
-@handler.add(MessageEvent, message=ImageMessage)
-def handle_image(event):
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text="📸 ได้รับรูปภาพแล้วครับ! ระบบกำลังประมวลผลแปลงเป็น Excel รอสักครู่...")
-    )
+if uploaded_file and api_key:
+    image = Image.open(uploaded_file)
+    st.image(image, caption="รูปภาพที่คุณอัปโหลด", use_container_width=True)
     
-    try:
-        # 1. ดาวน์โหลดรูปภาพจาก LINE
-        message_content = line_bot_api.get_message_content(event.message.id)
-        image_bytes = message_content.content
-        image = Image.open(io.BytesIO(image_bytes))
-        
-        # 2. ใช้ Gemini AI แปลงรูปเป็นข้อมูล
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        prompt = (
-            "Extract data from this production log sheet image. "
-            "Map the data into 31 columns corresponding to: " + ", ".join(HEADERS) + ". "
-            "Return the data as structured JSON rows."
-        )
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=[image, prompt]
-        )
-        
-        # 3. แปลงลง Excel และเซฟลงโฟลเดอร์ static
-        filename = f"report_{uuid.uuid4().hex[:8]}.xlsx"
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        
-        df = pd.DataFrame(columns=HEADERS)
-        df.to_excel(filepath, index=False)
-        
-        # 4. สร้าง ลิงก์ดาวน์โหลด และส่งกลับหาผู้ใช้ใน LINE
-        # (Render จะใช้ Request Host URL อัตโนมัติ)
-        download_url = f"{request.host_url}static/{filename}"
-        
-        line_bot_api.push_message(
-            event.source.user_id,
-            TextSendMessage(text=f"✅ แปลงข้อมูลสำเร็จแล้วครับ!\n\n📊 กดดาวน์โหลดไฟล์ Excel ได้ที่นี่:\n{download_url}")
-        )
-        
-    except Exception as e:
-        print(f"Error: {e}")
-        line_bot_api.push_message(
-            event.source.user_id,
-            TextSendMessage(text=f"❌ เกิดข้อผิดพลาดในการประมวลผล: {str(e)}")
-        )
-
-if __name__ == "__main__":
-    app.run(port=5000)
+    if st.button("🚀 เริ่มแปลงข้อมูลเป็น Excel"):
+        with st.spinner("กำลังให้ Gemini AI อ่านข้อมูลและสร้างไฟล์ Excel..."):
+            try:
+                client = genai.Client(api_key=api_key)
+                prompt = (
+                    "Extract data from this production log sheet image. "
+                    "Map the data into 31 columns corresponding to: " + ", ".join(HEADERS) + ". "
+                    "Return the data as structured rows."
+                )
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=[image, prompt]
+                )
+                
+                # สร้าง DataFrame ตัวอย่างตามหัวข้อ 31 คอลัมน์
+                df = pd.DataFrame(columns=HEADERS)
+                
+                # แปลงเป็นไบต์สำหรับให้ดาวน์โหลด
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='Production')
+                excel_data = output.getvalue()
+                
+                st.success("✨ แปลงข้อมูลสำเร็จเรียบร้อยแล้ว!")
+                
+                st.download_button(
+                    label="📥 คลิกที่นี่เพื่อดาวน์โหลดไฟล์ Excel",
+                    data=excel_data,
+                    file_name="production_report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            except Exception as e:
+                st.error(f"❌ เกิดข้อผิดพลาด: {e}")
+elif uploaded_file and not api_key:
+    st.warning("⚠️ กรุณากรอก Gemini API Key ด้านบนก่อนกดอัปโหลดรูปครับ")
