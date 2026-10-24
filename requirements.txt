@@ -1,7 +1,5 @@
-flask
-line-bot-sdk
+streamlit
+google-genai
 pandas
 openpyxl
-google-genai
 pillow
-gunicorn
