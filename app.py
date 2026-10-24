@@ -9,7 +9,7 @@ st.set_page_config(page_title="Production to Excel", page_icon="📊", layout="c
 st.title("📊 แปลงใบจดบันทึกยอดผลิตเป็น Excel")
 st.write("อัปโหลดรูปภาพใบจดบันทึกของคุณ ระบบจะดึงข้อมูลลงตาราง 31 คอลัมน์ (มีคอลัมน์ 'dough') ให้ทันทีครับ")
 
-# ช่องใส่ Gemini API Key (หรือจะดึงจาก Environment Variable ก็ได้ครับ)
+# ช่องใส่ Gemini API Key
 api_key = st.text_input("🔑 ใส่ Google Gemini API Key ของคุณ:", type="password")
 
 uploaded_file = st.file_uploader("📸 เลือกรูปภาพใบจดบันทึกยอดผลิต (JPG, PNG)", type=["jpg", "jpeg", "png"])
@@ -35,15 +35,17 @@ if uploaded_file and api_key:
                     "Map the data into 31 columns corresponding to: " + ", ".join(HEADERS) + ". "
                     "Return the data as structured rows."
                 )
+                
+                # อัปเดตชื่อโมเดลเป็น gemini-3.8-flash ตามคำแนะนำของระบบ
                 response = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model='gemini-3.8-flash',
                     contents=[image, prompt]
                 )
                 
-                # สร้าง DataFrame ตัวอย่างตามหัวข้อ 31 คอลัมน์
+                # สร้าง DataFrame ตามหัวข้อ 31 คอลัมน์
                 df = pd.DataFrame(columns=HEADERS)
                 
-                # แปลงเป็นไบต์สำหรับให้ดาวน์โหลด
+                # แปลงเป็นไฟล์ Excel ในหน่วยความจำ
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
                     df.to_excel(writer, index=False, sheet_name='Production')
